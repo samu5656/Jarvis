@@ -1,0 +1,66 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Task {
+  id          String   @id @default(uuid())
+  userId      String
+  title       String
+  description String?
+  status      String   @default("PENDING")
+  dueAt       DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Reminder {
+  id         String   @id @default(uuid())
+  userId     String
+  title      String
+  runAt      DateTime
+  recurrence String?
+  status     String   @default("PENDING")
+}
+
+model Memory {
+  id         String   @id @default(uuid())
+  userId     String
+  type       String
+  content    String
+  source     String?
+  importance String   @default("LOW")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model ToolExecution {
+  id                   String   @id @default(uuid())
+  userId               String
+  toolName             String
+  risk                 String
+  status               String
+  confirmationRequired Boolean
+  createdAt            DateTime @default(now())
+}
+
+model Permission {
+  id        String   @id @default(uuid())
+  userId    String
+  toolName  String
+  policy    String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

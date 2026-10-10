@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+.DS_Store
+*.log
+coverage/
+jarvis_spec.txt
+Jarvis_Implementation_Specification.docx
