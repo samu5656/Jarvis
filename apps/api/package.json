@@ -9,13 +9,18 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@fastify/jwt": "^10.2.4",
+    "@jarvis/llm": "*",
+    "@jarvis/core": "*",
+    "@jarvis/tools": "*",
+    "@jarvis/tasks": "*",
+    "dotenv": "^16.4.5",
     "fastify": "^4.26.2",
-    "zod": "^3.22.4",
-    "dotenv": "^16.4.5"
+    "zod": "^3.22.4"
   },
   "devDependencies": {
-    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0",
     "ts-node": "^10.9.2",
-    "@types/node": "^20.0.0"
+    "typescript": "^5.0.0"
   }
 }

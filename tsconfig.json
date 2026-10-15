@@ -10,7 +10,15 @@
     "forceConsistentCasingInFileNames": true,
     "moduleResolution": "node",
     "resolveJsonModule": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "baseUrl": ".",
+    "paths": {
+      "@jarvis/llm": ["packages/llm/dist/index"],
+      "@jarvis/core": ["packages/core/dist/index"],
+      "@jarvis/tools": ["packages/tools/dist/index"],
+      "@jarvis/tasks": ["packages/tasks/dist/index"],
+      "@jarvis/memory": ["packages/memory/dist/index"]
+    }
   },
   "exclude": ["node_modules", "dist"]
 }
