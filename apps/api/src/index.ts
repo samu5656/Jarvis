@@ -7,8 +7,25 @@ import { prisma } from './prisma';
 import { createLLMProvider, LLMProvider } from '@jarvis/llm';
 import { JarvisOrchestrator } from '@jarvis/core';
 import { TaskService, ScheduledReminderQueue, CreateTaskInputSchema, UpdateTaskInputSchema, CreateReminderInputSchema } from '@jarvis/tasks';
+import { MemoryService, CreateMemoryInputSchema } from '@jarvis/memory';
+import {
+  DraftEmailInputSchema,
+  SendEmailInputSchema,
+  ReadCalendarInputSchema,
+  SearchFilesInputSchema,
+  ExtractDocumentInputSchema,
+  SummarizeDocumentInputSchema,
+  WebSearchInputSchema,
+  BrowserActionInputSchema,
+} from '@jarvis/tools';
+import { VoiceCommandLoop, WindowsNativeTTSProvider, VoiceSessionInputSchema } from '@jarvis/voice';
+import { AutomationEngine, AutomationQueueWorker, WorkflowDefinitionSchema } from '@jarvis/automation';
+import { ProactiveService, UpdatePreferencesInputSchema } from '@jarvis/proactive';
 
-dotenv.config({ path: '../../.env' });
+import path from 'path';
+
+dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 // Config validation
 const envSchema = z.object({
@@ -40,6 +57,57 @@ const orchestrator = new JarvisOrchestrator(llmProvider);
 const taskService = new TaskService();
 const reminderScheduler = new ScheduledReminderQueue(taskService.getStorage());
 reminderScheduler.restoreFromStorage().catch(console.error);
+
+// Initialize Memory Service (M8)
+const memoryService = new MemoryService();
+
+// Initialize Voice Command Loop (M12)
+const voiceLoop = new VoiceCommandLoop({
+  tts: new WindowsNativeTTSProvider(process.env.VOICE_AUDIO_OUTPUT === 'true'),
+  commandHandler: async (command: string, sessionId: string) => {
+    const chatRes = await orchestrator.processMessage(command, { sessionId });
+    return chatRes.response;
+  },
+});
+
+// Initialize Automation Engine & Worker (M13)
+const automationEngine = new AutomationEngine(async (toolName, input, context) => {
+  const result = await orchestrator.getRuntime().executeTool(toolName, input, {
+    userId: context?.userId || 'automation-user',
+    confirmed: true, // Automation actions are pre-approved within defined workflows
+  });
+  return {
+    success: result.success,
+    data: result.data,
+    error: result.error,
+  };
+});
+const automationWorker = new AutomationQueueWorker(automationEngine);
+
+// Initialize Proactive Jarvis (M14)
+const proactiveService = new ProactiveService({
+  taskProvider: {
+    getPendingTasks: async (userId: string) => {
+      const tasks = await taskService.getTasks(userId);
+      return tasks.map((t) => ({
+        id: t.id,
+        title: t.title,
+        priority: 'MEDIUM',
+        dueDate: t.dueAt,
+      }));
+    },
+  },
+  calendarProvider: {
+    getUpcomingEvents: async (userId: string) => {
+      const calRes = await orchestrator.getRuntime().executeTool('read_calendar', {}, { userId });
+      return (calRes.data || []).map((e: any) => ({
+        id: e.id,
+        title: e.title,
+        startTime: e.startTime,
+      }));
+    },
+  },
+});
 
 const server = Fastify({
   logger: true,
@@ -224,6 +292,243 @@ server.delete('/api/v1/reminders/:id', async (request: any, reply) => {
     return reply.status(404).send({ error: 'Reminder not found' });
   }
   return { success: true, cancelled: true };
+});
+
+// Memory Endpoints (M8 - Section 8 Specification)
+server.get('/api/v1/memories', async (request: any, _reply) => {
+  const userId = request.query?.userId || 'default-user';
+  const query = request.query?.query;
+  const type = request.query?.type;
+  const memories = await memoryService.recall(userId, query, { type });
+  return { memories, total: memories.length };
+});
+
+server.post('/api/v1/memories', async (request: any, reply) => {
+  try {
+    const input = CreateMemoryInputSchema.parse(request.body);
+    const userId = request.body?.userId || 'default-user';
+    const memory = await memoryService.remember(userId, input);
+    reply.status(201).send({ success: true, memory });
+  } catch (error: any) {
+    reply.status(400).send({ error: error.message || 'Invalid memory input' });
+  }
+});
+
+// Calendar & Email Endpoints (M9 - Section 9 & 10 Specification)
+server.get('/api/v1/calendar', async (request: any, reply) => {
+  try {
+    const queryParams = ReadCalendarInputSchema.parse(request.query || {});
+    const result = await orchestrator.getRuntime().executeTool('read_calendar', queryParams, {
+      userId: request.query?.userId || 'default-user',
+    });
+    return result;
+  } catch (error: any) {
+    reply.status(400).send({ error: error.message || 'Invalid calendar query' });
+  }
+});
+
+server.post('/api/v1/email/draft', async (request: any, reply) => {
+  try {
+    const input = DraftEmailInputSchema.parse(request.body);
+    const result = await orchestrator.getRuntime().executeTool('draft_email', input, {
+      userId: request.body?.userId || 'default-user',
+    });
+    reply.status(201).send(result);
+  } catch (error: any) {
+    reply.status(400).send({ error: error.message || 'Invalid email draft input' });
+  }
+});
+
+server.post('/api/v1/email/send', async (request: any, reply) => {
+  try {
+    const input = SendEmailInputSchema.parse(request.body);
+    const confirmed = Boolean(request.body?.confirmed);
+    const result = await orchestrator.getRuntime().executeTool('send_email', input, {
+      userId: request.body?.userId || 'default-user',
+      confirmed,
+    });
+    if (!result.success && result.confirmationRequired) {
+      return reply.status(403).send({
+        error: 'Confirmation required: External email send requires explicit user approval.',
+        confirmationRequired: true,
+        auditEntry: result.auditEntry,
+      });
+    }
+    return result;
+  } catch (error: any) {
+    reply.status(400).send({ error: error.message || 'Invalid send email request' });
+  }
+});
+
+// File Assistant Endpoints (M10 - Section 10 Specification)
+server.get('/api/v1/files/search', async (request: any, reply) => {
+  try {
+    const input = SearchFilesInputSchema.parse(request.query);
+    const result = await orchestrator.getRuntime().executeTool('search_files', input, {
+      userId: request.query?.userId || 'default-user',
+    });
+    if (!result.success) {
+      return reply.status(403).send({ error: result.error });
+    }
+    return result;
+  } catch (error: any) {
+    reply.status(400).send({ error: error.message || 'Invalid search parameters' });
+  }
+});
+
+server.post('/api/v1/files/extract', async (request: any, reply) => {
+  try {
+    const input = ExtractDocumentInputSchema.parse(request.body);
+    const result = await orchestrator.getRuntime().executeTool('extract_document', input, {
+      userId: request.body?.userId || 'default-user',
+    });
+    if (!result.success) {
+      return reply.status(403).send({ error: result.error });
+    }
+    return result;
+  } catch (error: any) {
+    reply.status(400).send({ error: error.message || 'Invalid file extraction request' });
+  }
+});
+
+server.post('/api/v1/files/summarize', async (request: any, reply) => {
+  try {
+    const input = SummarizeDocumentInputSchema.parse(request.body);
+    const result = await orchestrator.getRuntime().executeTool('summarize_document', input, {
+      userId: request.body?.userId || 'default-user',
+    });
+    if (!result.success) {
+      return reply.status(403).send({ error: result.error });
+    }
+    return result;
+  } catch (error: any) {
+    reply.status(400).send({ error: error.message || 'Invalid summarization request' });
+  }
+});
+
+// Browser & Web Endpoints (M11 - Section 11 Specification)
+server.get('/api/v1/web/search', async (request: any, reply) => {
+  try {
+    const input = WebSearchInputSchema.parse(request.query);
+    const result = await orchestrator.getRuntime().executeTool('web_search', input, {
+      userId: request.query?.userId || 'default-user',
+    });
+    return result;
+  } catch (error: any) {
+    reply.status(400).send({ error: error.message || 'Invalid web search query' });
+  }
+});
+
+server.post('/api/v1/browser/action', async (request: any, reply) => {
+  try {
+    const input = BrowserActionInputSchema.parse(request.body);
+    const confirmed = Boolean(request.body?.confirmed);
+    const result = await orchestrator.getRuntime().executeTool('browser_action', input, {
+      userId: request.body?.userId || 'default-user',
+      confirmed,
+    });
+    if (!result.success && result.confirmationRequired) {
+      return reply.status(403).send({
+        error: 'Confirmation required: Browser action requires explicit user approval.',
+        confirmationRequired: true,
+        auditEntry: result.auditEntry,
+      });
+    }
+    if (!result.success) {
+      return reply.status(400).send({ error: result.error });
+    }
+    return result;
+  } catch (error: any) {
+    reply.status(400).send({ error: error.message || 'Invalid browser action request' });
+  }
+});
+
+// Voice Endpoints (M12 - Section 2 & 12 Specification)
+server.post('/api/v1/voice/listen', async (request: any, reply) => {
+  try {
+    const input = VoiceSessionInputSchema.parse(request.body || {});
+    const result = await voiceLoop.processVoiceInput(input);
+    return result;
+  } catch (error: any) {
+    reply.status(400).send({ error: error.message || 'Invalid voice session input' });
+  }
+});
+
+// Automation Engine Endpoints (M13 - Section 3 & 10 Specification)
+server.get('/api/v1/workflows', async (_request, _reply) => {
+  const workflows = automationEngine.listWorkflows();
+  return { workflows, total: workflows.length };
+});
+
+server.post('/api/v1/workflows', async (request: any, reply) => {
+  try {
+    const input = WorkflowDefinitionSchema.parse(request.body);
+    const workflow = automationEngine.createWorkflow(input);
+    reply.status(201).send({ success: true, workflow });
+  } catch (error: any) {
+    reply.status(400).send({ error: error.message || 'Invalid workflow specification' });
+  }
+});
+
+server.post('/api/v1/workflows/:id/trigger', async (request: any, reply) => {
+  try {
+    const { id } = request.params as { id: string };
+    const idempotencyKey = request.headers['x-idempotency-key'] || request.body?.idempotencyKey;
+    const payload = request.body?.payload || {};
+
+    const log = await automationEngine.triggerWorkflow(id, payload, {
+      idempotencyKey: idempotencyKey as string | undefined,
+    });
+    return { success: true, log };
+  } catch (error: any) {
+    reply.status(400).send({ error: error.message || 'Workflow execution error' });
+  }
+});
+
+server.get('/api/v1/workflows/history', async (request: any, _reply) => {
+  const workflowId = request.query?.workflowId;
+  const history = automationEngine.getExecutionHistory(workflowId);
+  return { history, total: history.length };
+});
+
+// Proactive Jarvis Endpoints (M14 - Section 10 Specification)
+server.get('/api/v1/proactive/briefing', async (request: any, _reply) => {
+  const userId = request.query?.userId || 'default-user';
+  const briefing = await proactiveService.generateDailyBriefing(userId);
+  return { briefing };
+});
+
+server.get('/api/v1/proactive/preferences', async (request: any, _reply) => {
+  const userId = request.query?.userId || 'default-user';
+  const preferences = proactiveService.getPreferences(userId);
+  return { preferences };
+});
+
+server.patch('/api/v1/proactive/preferences', async (request: any, reply) => {
+  try {
+    const userId = request.body?.userId || 'default-user';
+    const input = UpdatePreferencesInputSchema.parse(request.body);
+    const updated = proactiveService.updatePreferences(userId, input);
+    return { success: true, preferences: updated };
+  } catch (error: any) {
+    reply.status(400).send({ error: error.message || 'Invalid preferences payload' });
+  }
+});
+
+server.get('/api/v1/proactive/notifications', async (request: any, _reply) => {
+  const userId = request.query?.userId || 'default-user';
+  const unreadOnly = request.query?.unread === 'true';
+  const notifications = proactiveService.getNotifications(userId, unreadOnly);
+  return { notifications, total: notifications.length };
+});
+
+server.patch('/api/v1/proactive/notifications/:id/read', async (request: any, reply) => {
+  const { id } = request.params as { id: string };
+  const marked = proactiveService.markAsRead(id);
+  if (!marked) {
+    return reply.status(404).send({ error: 'Notification not found' });
+  }
+  return { success: true, marked: true };
 });
 
 // Authentication endpoint (simplified for MVP - creates/gets a user)

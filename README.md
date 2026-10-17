@@ -138,6 +138,139 @@ Persistent task CRUD and restart-resilient scheduled reminders:
    node scripts/test-tasks-reminders.js
    ```
 
+## Memory (M8)
+Short-term conversation state plus durable user-approved memories:
+- Isolated memory retrieval scoped per user to prevent unrelated data exposure.
+- Importance ranking (`HIGH` > `MEDIUM` > `LOW`) and timestamp sorting.
+- REST API:
+  - `GET /api/v1/memories`
+  - `POST /api/v1/memories`
+
+## Calendar / Email (M9)
+Read calendar events, draft emails safely, and enforce confirmation gating for outbound messages:
+- `read_calendar`: Query and filter calendar events with date ranges and keyword searches (Risk: `LOW`).
+- `draft_email`: Prepare and store email drafts in a draft repository without external transmission (Risk: `LOW`).
+- `send_email`: External message transmission gated by mandatory confirmation (Risk: `HIGH`).
+- Acceptance Guarantee: Jarvis never sends an external message without explicit user approval.
+- REST API:
+  - `GET /api/v1/calendar`
+  - `POST /api/v1/email/draft`
+  - `POST /api/v1/email/send` (blocked with 403 / `confirmationRequired` unless confirmed)
+
+### Testing Calendar & Email
+1. Run unit tests:
+   ```bash
+   node --test packages/tools/dist/__tests__/calendar-email.test.js
+   ```
+2. Run M9 acceptance script:
+   ```bash
+   node scripts/test-calendar-email.js
+   ```
+
+## File Assistant (M10)
+Approved-directory search, document extraction, and summarization:
+- `search_files`: Recursive search within approved directory scopes only.
+- `extract_document`: Read text/code contents of files within approved scopes with size caps.
+- `summarize_document`: Structured key-point summarization of documents or text extracts.
+- Acceptance Guarantee: Files outside configured scopes or attempted directory traversal attacks (`../`) are strictly blocked.
+- REST API:
+  - `GET /api/v1/files/search`
+  - `POST /api/v1/files/extract`
+  - `POST /api/v1/files/summarize`
+
+### Testing File Assistant
+1. Run unit tests:
+   ```bash
+   node --test packages/tools/dist/__tests__/file-assistant.test.js
+   ```
+2. Run M10 acceptance script:
+   ```bash
+   node scripts/test-file-assistant.js
+   ```
+
+## Browser / Web Tools (M11)
+Controlled browser actions and web search:
+- `web_search`: Retrieve structured search results and documentation within policy limits (Risk: `LOW`).
+- `browser_action`: Controlled browser actions (`navigate`, `extract_text`, `submit_form`, `download_file`, `execute_script`).
+- Acceptance Guarantee: Navigation strictly validates URL policies (prohibiting malicious schemes like `file:`, `javascript:`, `vbscript:`); mutating/dangerous external actions (`submit_form`, `download_file`, `execute_script`) strictly remain gated behind explicit user confirmation.
+- REST API:
+  - `GET /api/v1/web/search`
+  - `POST /api/v1/browser/action` (returns 403 `confirmationRequired: true` unless confirmed)
+
+### Testing Browser & Web Tools
+1. Run unit tests:
+   ```bash
+   node --test packages/tools/dist/__tests__/browser-web.test.js
+   ```
+2. Run M11 acceptance script:
+   ```bash
+   node scripts/test-browser-web.js
+   ```
+
+## Voice (M12)
+Wake word, speech-to-text, text-to-speech, and hands-free command loop:
+- `WakeWordDetector`: High-accuracy detection of "Hey Jarvis" and conversational variants with command extraction.
+- `FastSTTProvider`: Audio input stream transcription.
+- `WindowsNativeTTSProvider`: System speech synthesis providing real audible audio output on Windows workstation.
+- `VoiceCommandLoop`: Complete hands-free pipeline connecting wake word detection directly to Orchestrator planning and TTS audible replies.
+- Acceptance Guarantee: "Hey Jarvis" starts a command session and produces an audible response.
+- REST API:
+  - `POST /api/v1/voice/listen`
+
+### Testing Voice
+1. Run unit tests:
+   ```bash
+   node --test packages/voice/dist/__tests__/voice.test.js
+   ```
+2. Run M12 acceptance script:
+   ```bash
+   node scripts/test-voice.js
+   ```
+
+## Automation Engine (M13)
+Trigger-condition-action workflows with BullMQ/Queue workers, retry resilience, and idempotency controls:
+- `AutomationEngine`: Supports schedule, event, and webhook triggers with field-level condition evaluation.
+- `AutomationQueueWorker`: Background job queue dispatcher for automated task workflows.
+- Configurable retry policies with exponential backoff on transient errors.
+- Strict idempotency key deduplication to prevent duplicate action execution.
+- REST API:
+  - `GET /api/v1/workflows`
+  - `POST /api/v1/workflows`
+  - `POST /api/v1/workflows/:id/trigger`
+  - `GET /api/v1/workflows/history`
+
+### Testing Automation Engine
+1. Run unit tests:
+   ```bash
+   node --test packages/automation/dist/__tests__/automation.test.js
+   ```
+2. Run M13 acceptance script:
+   ```bash
+   node scripts/test-automation.js
+   ```
+
+## Proactive Jarvis (M14)
+Daily briefing, deadline detection, and category-filtered proactive notifications:
+- `ProactiveService`: Integrates with Tasks and Calendar to assemble comprehensive Daily Briefings.
+- Automatic deadline detection scanning pending tasks due within configurable hourly thresholds.
+- Acceptance Guarantee: Jarvis proactively notifies only for explicitly enabled notification categories; disabled categories are strictly suppressed.
+- REST API:
+  - `GET /api/v1/proactive/briefing`
+  - `GET /api/v1/proactive/preferences`
+  - `PATCH /api/v1/proactive/preferences`
+  - `GET /api/v1/proactive/notifications`
+  - `PATCH /api/v1/proactive/notifications/:id/read`
+
+### Testing Proactive Jarvis
+1. Run unit tests:
+   ```bash
+   node --test packages/proactive/dist/__tests__/proactive.test.js
+   ```
+2. Run M14 acceptance script:
+   ```bash
+   node scripts/test-proactive.js
+   ```
+
 ## Milestones
 - [x] M1 - Foundation
 - [x] M2 - Identity & Configuration
@@ -146,5 +279,11 @@ Persistent task CRUD and restart-resilient scheduled reminders:
 - [x] M5 - Tool Runtime
 - [x] M6 - Computer Control v1
 - [x] M7 - Tasks & Reminders
-- [ ] M8 - Memory
+- [x] M8 - Memory
+- [x] M9 - Calendar / Email
+- [x] M10 - File Assistant
+- [x] M11 - Browser/Web Tools
+- [x] M12 - Voice
+- [x] M13 - Automation Engine
+- [x] M14 - Proactive Jarvis
 

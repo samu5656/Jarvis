@@ -17,7 +17,10 @@
       "@jarvis/core": ["packages/core/dist/index"],
       "@jarvis/tools": ["packages/tools/dist/index"],
       "@jarvis/tasks": ["packages/tasks/dist/index"],
-      "@jarvis/memory": ["packages/memory/dist/index"]
+      "@jarvis/memory": ["packages/memory/dist/index"],
+      "@jarvis/voice": ["packages/voice/dist/index"],
+      "@jarvis/automation": ["packages/automation/dist/index"],
+      "@jarvis/proactive": ["packages/proactive/dist/index"]
     }
   },
   "exclude": ["node_modules", "dist"]
